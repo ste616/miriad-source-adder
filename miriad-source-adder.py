@@ -9,7 +9,7 @@ Usage:
 -r --ra RA              the RA of a source to add HH:MM:SS.S
 -d --dec DEC            the declination of a source to add DDD:MM:SS.S
 -f --flux FLUX          the flux density of a source to add in Jy
--S --size BMAJ,BMIN,BPA the size of a source to add, in arcsec for each number
+-S --size BMAJ,BMIN,BPA the size of a source to add, in arcsec for each length, and degrees for the angle
 -a --alpha ALPHA        the spectral index of a source to add
 -o --out OUT            output the mixed dataset with this name
 
@@ -23,6 +23,7 @@ from datetime import date, datetime
 import os
 import shutil
 import numpy as np
+import sys
 
 # A routine to turn a Miriad type time string into a ephem Date.
 def mirtime_to_date(mt):
@@ -224,7 +225,8 @@ def add_source(args):
         source._epoch = "2000"
         source._ra = index_data['sources'][i]['right_ascension']
         source._dec = index_data['sources'][i]['declination']
-
+        source.compute()
+        
         # Find the times that this source was observed.
         source_observation_idx = np.where(index_data['index']['source'] == source.name)
         source_observation_times = index_data['index']['time'][source_observation_idx]
@@ -257,14 +259,39 @@ def add_source(args):
         # Work out the inputs to uvgen.
         if (arguments['--source-file'] is not None):
             uvgen_source = arguments['--source-file']
-        # Determine the offset between the sources we want to add and the pointing centre.
-        for j in xrange(0, len(args['ra'])):
-            nsource = ephem.FixedBody()
-            nsource._epoch = "2000"
-            nsource._ra = args['ra'][j]
-            nsource._dec = args['dec'][j]
-        
-        uvgen_source = "addsource" # FIX THIS HARDCODED VALUE
+        else:
+            # We create the source file per pointing.
+            # Determine the offset between the sources we want to add and the pointing centre.
+            src_lines = []
+            for j in xrange(0, len(args['--ra'])):
+                nsource = ephem.FixedBody()
+                nsource._epoch = "2000"
+                nsource._ra = args['--ra'][j]
+                nsource._dec = args['--dec'][j]
+                nsource.compute()
+                dra = (nsource.ra - source.ra) * (180. * 3600.) / math.pi # in arcseconds
+                ddec = (nsource.dec - source.dec) * (180. * 3600.) / math.pi # also in arcseconds
+                # The source flux density.
+                fluxdens = float(args['--flux'][j]) # in Jy
+                # The source size.
+                szel = args['--size'][j].split(",")
+                if (len(szel) != 3):
+                    print "ERROR: the size of source %d was not correctly specified" % (j + 1)
+                    sys.exit()
+                bmaj = float(szel[0])
+                bmin = float(szel[1])
+                bpa = float(szel[2])
+                # The spectral index.
+                specidx = float(args['--alpha'][j])
+                src_lines.append("%.6f,%.3f,%.3f,%.3f,%.3f,%.3f,0,0,0,%.3f" % (fluxdens, dra, ddec,
+                                                                               bmaj, bmin, bpa, specidx))
+            # Make the file.
+            uvgen_source = "source_created_%s" % source.name
+            print "  Creating source generation file %s" % uvgen_source
+            with open(uvgen_source, "w") as fp:
+                for j in xrange(0, len(src_lines)):
+                    fp.write("%s\n" % src_lines[j])
+            
         uvgen_telescop = telescope_coordinates['telescope'].lower()
         uvgen_stokes = ",".join(index_data['polarisations']).lower()
         print uvgen_source
@@ -272,8 +299,8 @@ def add_source(args):
         print uvgen_stokes
         uvgen_lat = "%.6f" % math.degrees(telescope.lat)
         print uvgen_lat
-        uvgen_radec = "%s,%s" % (index_data['sources'][0]['right_ascension'],
-                                 index_data['sources'][0]['declination'])
+        uvgen_radec = "%s,%s" % (index_data['sources'][i]['right_ascension'],
+                                 index_data['sources'][i]['declination'])
         print uvgen_radec
         # Extend the HA range a little on each side
         uvgen_harange = "%d,%d,%.16f" % (math.floor(start_hour_angle),
@@ -299,12 +326,13 @@ def add_source(args):
         uvgen_baseunit = 3.33564
         
         # The name of the simulated dataset.
-        simulated_name = "%s.uvgen" % dataset_name
+        simulated_name = "%s_%s.uvgen" % (args['--out'], source.name)
         # Delete this set if it exists.
         if os.path.isdir(simulated_name):
             shutil.rmtree(simulated_name)
 
         # Run uvgen now.
+        print "  Running uvgen for source %d / %d" % ((i + 1), len(index_data['sources']))
         miriad.uvgen(source=uvgen_source, ant=uvgen_ant, baseunit=uvgen_baseunit,
                      telescop=uvgen_telescop, corr=uvgen_corr, time=uvgen_time,
                      freq=uvgen_freq, radec=uvgen_radec, harange=uvgen_harange,
@@ -345,6 +373,6 @@ if __name__ == '__main__':
             print "Specified source file cannot be found."
             valid = false
     if (valid == True):
-        addsource(arguments)
+        add_source(arguments)
 
     
