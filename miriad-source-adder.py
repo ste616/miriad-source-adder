@@ -1,8 +1,8 @@
 #!/usr/bin/python
-"""SourceAdd.
+"""Miriad Source Adding Helper
 
 Usage:
-  sourceadd.py [--source-file=<str>] [--ra=<str> ...] [--dec=<str> ...] [--flux=<flux> ...] [--size=<bmaj,bmin,bpa> ...] [--alpha=<alpha> ...] [--out=<str>] <dataset>
+  miriad-source-adder.py [--source-file=<str>] [--ra=<str> ...] [--dec=<str> ...] [--flux=<flux> ...] [--size=<bmaj,bmin,bpa> ...] [--alpha=<alpha> ...] [--out=<str>] <dataset>
 
 -h --help               show this
 -s --source-file FILE   file to give to uvgen as "source" parameter
