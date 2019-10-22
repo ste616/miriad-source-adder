@@ -312,7 +312,7 @@ def add_source(args):
 
 
 if __name__ == '__main__':
-    arguments = docopt(__doc__, version="SourceAdd 1.0")
+    arguments = docopt(__doc__, version="Miriad Source Adding Helper 1.0")
     valid = True
     # Do some existence checking.
     if (('<dataset>' not in arguments) or
