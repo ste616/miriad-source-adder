@@ -2,17 +2,17 @@
 """Miriad Source Adding Helper
 
 Usage:
-  miriad-source-adder.py [--source-file=<str>] [--ra=<str> ...] [--dec=<str> ...] [--flux=<flux> ...] [--size=<bmaj,bmin,bpa> ...] [--alpha=<alpha> ...] [--out=<str>] <dataset>
+  miriad-source-adder.py [--source-file=<str>] [--ra=<str> ...] [--dec=<str> ...] [--flux=<flux> ...] [--size=<bmaj,bmin,bpa> ...] [--alpha=<alpha> ...] [--out=<str>] [--test] <dataset>
 
--h --help               show this
--s --source-file FILE   file to give to uvgen as "source" parameter
--r --ra RA              the RA of a source to add HH:MM:SS.S
--d --dec DEC            the declination of a source to add DDD:MM:SS.S
--f --flux FLUX          the flux density of a source to add in Jy
--S --size BMAJ,BMIN,BPA the size of a source to add, in arcsec for each length, and degrees for the angle
--a --alpha ALPHA        the spectral index of a source to add
--o --out OUT            output the mixed dataset with this name
-
+-h --help                show this
+-s --source-file FILE    file to give to uvgen as "source" parameter
+-r --ra RA               the RA of a source to add HH:MM:SS.S
+-d --dec DEC             the declination of a source to add DDD:MM:SS.S
+-f --flux FLUX           the flux density of a source to add in Jy
+-S --size BMAJ,BMIN,BPA  the size of a source to add, in arcsec for each length, and degrees for the angle
+-a --alpha ALPHA         the spectral index of a source to add
+-o --out OUT             output the mixed dataset with this name
+-t --test                only do a single source uvgen for testing purposes
 """
 
 from docopt import docopt
@@ -46,6 +46,19 @@ def round_date_5second(dt):
     dd = 5 - dsecd
     dt = ephem.date(dt + dd * ephem.second)
     return dt
+
+def round_date_nsecond(dt, n):
+    # This routine takes some date, and returns the date nearest to
+    # that which falls an integer number of n-second intervals away
+    # from midnight on that day.
+    d = dt.datetime()
+    # How many seconds after midnight do we have?
+    ts = d.second + d.minute * 60 + d.hour * 3600
+    # Work out the nearest cycle centre.
+    ccs = round(((ts - n / 2) / n)) * n + (n / 2)
+    dd = ccs - ts
+    rt = ephem.date(dt + dd * ephem.second)
+    return rt
 
 def date_to_mirtime(dt):
     # Output a Miriad formatted date.
@@ -172,6 +185,19 @@ def filter_uvlist_antennas(output):
                 rd['antennas'].append(ant)
     return rd
 
+# Use a uvlist log to get the cycle time.
+def filter_uvlist_variables(logfile_name):
+    # We send back a dictionary.
+    rd = { 'cycle_time': -1. }
+    with open(logfile_name, "r") as fp:
+        loglines = fp.readlines()
+    for i in xrange(0, len(loglines)):
+        index_elements = loglines[i].split()
+        if ((len(index_elements) > 2) and
+            (index_elements[0] == "inttime") and (index_elements[1] == ":")):
+            rd['cycle_time'] = float(index_elements[2])
+    return rd
+
 def get_hour_angle(source, observer):
     source.compute(observer)
     hour_angle = (observer.sidereal_time() - source._ra) * 180. / (math.pi * 15.)
@@ -191,16 +217,47 @@ def output_antenna_file(location, filename):
         for i in xrange(0, len(lines)):
             fp.write("%s\n" % lines[i])
 
+def split_into_segments(idx):
+    # We go through a uvindex dictionary and return segments.
+    # Each segment is a single source, with a start and end time.
+    segs = []
+    oldsrc = ""
+    sseg = None
+    for i in xrange(0, len(idx['index']['source'])):
+        if (idx['index']['source'][i] != oldsrc):
+            if (oldsrc != ""):
+                # Put the segment on the list.
+                segs.append(sseg)
+            oldsrc = idx['index']['source'][i]
+            sseg = { 'source': idx['index']['source'][i],
+                     'start_time': ephem.Date(idx['index']['time'][i]),
+                     'end_time': ephem.Date(idx['index']['time'][i]) }
+        else:
+            sseg['end_time'] = idx['index']['time'][i]
+    return segs
+            
 def add_source(args):
     # Let's create a uvindex of the dataset first.
     dataset_name = args['<dataset>']
     miriad.set_filter('uvindex', filter_uvindex)
     index_data = miriad.uvindex(vis=dataset_name, interval="0.1")
 
+    # Get the cycle time.
+    uvlist_log_name = "uvlist.log"
+    if (os.path.isfile(uvlist_log_name)):
+        os.remove(uvlist_log_name)
+    # We write to a log because otherwise this command waits for the user to press
+    # the enter key halfway through operation.
+    miriad.uvlist(vis=dataset_name, options="variables,full",
+                  log=uvlist_log_name)
+    telescope_variables = filter_uvlist_variables(uvlist_log_name)
+    cycle_time = round(telescope_variables['cycle_time'])
+    print "Found cycle time of %d seconds" % cycle_time
+    
     # Get the position of the telescope.
     miriad.set_filter('uvlist', filter_uvlist_antennas)
     telescope_coordinates = miriad.uvlist(vis=dataset_name, options="array,full")
-
+    
     # Set up a pyephem observatory for this telescope.
     telescope = ephem.Observer()
     telescope.pressure = 0
@@ -218,43 +275,49 @@ def add_source(args):
         print "WARNING: multiple sources present, but a source file has been given."
         print "         This is probably not what you wanted, but we continue in case it is."
     
-    for i in xrange(0, len(index_data['sources'])):
+
+    # We'll go through in segments, as this will handle mosaic observations
+    # more efficiently.
+    segments = split_into_segments(index_data)
+
+    # Work out how many of these things to do.
+    num_gens = len(segments)
+    if (args['--test']):
+        num_gens = 1
+    
+    for i in xrange(0, num_gens):
         # Make a source object for this position.
         source = ephem.FixedBody()
-        source.name = index_data['sources'][i]['name']
+        source.name = segments[i]['source']
         source._epoch = "2000"
-        source._ra = index_data['sources'][i]['right_ascension']
-        source._dec = index_data['sources'][i]['declination']
+        for j in xrange(0, len(index_data['sources'])):
+            if (index_data['sources'][j]['name'] == segments[i]['source']):
+                source._ra = index_data['sources'][j]['right_ascension']
+                source._dec = index_data['sources'][j]['declination']
+                break
         source.compute()
         
-        # Find the times that this source was observed.
-        source_observation_idx = np.where(index_data['index']['source'] == source.name)
-        source_observation_times = index_data['index']['time'][source_observation_idx]
-        
+        ##### Find the times that this source was observed.
         # Where was the source at the start of the observations?
         # Go to the starting time of the observation.
-        telescope.date = ephem.Date(source_observation_times[0])
+        telescope.date = ephem.Date(segments[i]['start_time'])
         # We really just need the hour angle.
         start_hour_angle = get_hour_angle(source, telescope)
 
         # And the same for the end of the observation.
-        telescope.date = ephem.Date(source_observation_times[-1])
+        telescope.date = ephem.Date(segments[i]['end_time'])
         finish_hour_angle = get_hour_angle(source, telescope)
         print "%s %f %f" % (source.name, start_hour_angle, finish_hour_angle)
 
         # Work out the 0 hour angle. Get the nearest time to 0.
         transit_time = None
         if (abs(start_hour_angle) < abs(finish_hour_angle)):
-            transit_time = source_observation_times[0] - (start_hour_angle * ephem.hour)
+            transit_time = segments[i]['start_time'] - (start_hour_angle * ephem.hour)
         else:
-            transit_time = source_observation_times[-1] - (finish_hour_angle * ephem.hour)
+            transit_time = segments[i]['end_time'] - (finish_hour_angle * ephem.hour)
         transit_time = ephem.Date(transit_time)
 
         print "transit time is %s" % transit_time
-        rounded_transit_time = round_date_5second(transit_time)
-        print "rounded transit time is %s" % rounded_transit_time
-        telescope.date = transit_time
-        print "LST at transit time (check) is %s" % telescope.sidereal_time()
 
         # Work out the inputs to uvgen.
         if (arguments['--source-file'] is not None):
@@ -302,12 +365,14 @@ def add_source(args):
         uvgen_radec = "%s,%s" % (index_data['sources'][i]['right_ascension'],
                                  index_data['sources'][i]['declination'])
         print uvgen_radec
-        # Extend the HA range a little on each side
-        uvgen_harange = "%d,%d,%.16f" % (math.floor(start_hour_angle),
-                                         math.ceil(finish_hour_angle), (10. * 1.00273790935 / 3600.))
+        # Extend the HA range a little on each side.
+        sidereal_modifier = 1.00273790935
+        start_ha = math.floor(start_hour_angle * 10. * sidereal_modifier) / 10.
+        finish_ha = math.ceil(finish_hour_angle * 10. * sidereal_modifier) / 10.
+        uvgen_harange = "%.2f,%.2f" % (start_ha, finish_ha)
         print uvgen_harange
         # The time at 0 HA.
-        uvgen_time = date_to_mirtime(rounded_transit_time)
+        uvgen_time = date_to_mirtime(transit_time)
         print uvgen_time
         # Use only frequency config 0, but we could probably change that if we need to.
         print index_data['freq_configs']
@@ -332,11 +397,14 @@ def add_source(args):
             shutil.rmtree(simulated_name)
 
         # Run uvgen now.
-        print "  Running uvgen for source %d / %d" % ((i + 1), len(index_data['sources']))
+        print "  Running uvgen for source %d / %d" % ((i + 1), num_gens)
+        with open("last_uvgen.dbg", "w") as fp:
+            fp.write("uvgen source=%s ant=%s baseunit=%s telescop=%s corr=%s time=%s freq=%s radec=%s harange=%s stokes=%s lat=%s out=%s inttime=%s\n" % (uvgen_source, uvgen_ant, uvgen_baseunit, uvgen_telescop, uvgen_corr, uvgen_time, uvgen_freq, uvgen_radec, uvgen_harange, uvgen_stokes, uvgen_lat, simulated_name, cycle_time))
         miriad.uvgen(source=uvgen_source, ant=uvgen_ant, baseunit=uvgen_baseunit,
                      telescop=uvgen_telescop, corr=uvgen_corr, time=uvgen_time,
                      freq=uvgen_freq, radec=uvgen_radec, harange=uvgen_harange,
-                     stokes=uvgen_stokes, lat=uvgen_lat, out=simulated_name)
+                     stokes=uvgen_stokes, lat=uvgen_lat, out=simulated_name,
+                     inttime=cycle_time)
 
 
 if __name__ == '__main__':
@@ -373,6 +441,7 @@ if __name__ == '__main__':
             print "Specified source file cannot be found."
             valid = false
     if (valid == True):
+        print arguments
         add_source(arguments)
 
     
