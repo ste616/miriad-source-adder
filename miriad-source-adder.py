@@ -2,7 +2,7 @@
 """Miriad Source Adding Helper
 
 Usage:
-  miriad-source-adder.py [--source-file=<str>] [--ra=<str> ...] [--dec=<str> ...] [--flux=<flux> ...] [--size=<bmaj,bmin,bpa> ...] [--alpha=<alpha> ...] [--out=<str>] [--test] <dataset>
+  miriad-source-adder.py [--source-file=<str>] [--ra=<str> ...] [--dec=<str> ...] [--flux=<flux> ...] [--size=<bmaj,bmin,bpa> ...] [--alpha=<alpha> ...] [--out=<str>] [--test] [--temp-dir=<str>] <dataset>
 
 -h --help                show this
 -s --source-file FILE    file to give to uvgen as "source" parameter
@@ -13,6 +13,7 @@ Usage:
 -a --alpha ALPHA         the spectral index of a source to add
 -o --out OUT             output the mixed dataset with this name
 -t --test                only do a single source uvgen for testing purposes
+-T --temp-dir DIR        put all the intermediate files in this directory [default: .]
 """
 
 from docopt import docopt
@@ -234,8 +235,48 @@ def split_into_segments(idx):
                      'end_time': ephem.Date(idx['index']['time'][i]) }
         else:
             sseg['end_time'] = idx['index']['time'][i]
+    # Have to push the last segment on.
+    segs.append(sseg)
     return segs
-            
+
+def add_uvcat(fileString, newFile, outdir):
+    # Keep adding files to the uvcat input string until it gets too long
+    # and then do the uvcat.
+    lfs = len(fileString)
+    lnf = len(newFile)
+    maxlen = 950
+    if ((lfs + lnf + 1) < maxlen):
+        # Easy, just append the string.
+        return "%s,%s" % (fileString, newFile)
+    # Otherwise we do the uvcat.
+    files = fileString.split(",")
+    ohead, otail = os.path.split(files[0])
+    outFile = "%s/uvc_%s" % (outdir, otail)
+    if (os.path.isdir(outFile)):
+        shutil.rmtree(outFile)
+    print "  Concatenating intermediate product"
+    print "[%s]" % fileString
+    miriad.uvcat(vis=fileString, out=outFile)
+    # Now add the new file to this.
+    rv = add_uvcat(outFile, newFile, outdir)
+    return rv
+
+def stringToFloat(s):
+    # Take a sexagesimal string and return the float value.
+    cmps = s.split(":")
+    degs = float(cmps[0])
+    neg = False
+    if (cmps[0][0] == "-"):
+        neg = True
+    if neg:
+        degs = degs * -1.
+    mins = float(cmps[1])
+    secs = float(cmps[2])
+    val = degs + mins / 60. + secs / 3600.
+    if neg:
+        val = val * -1.
+    return val
+
 def add_source(args):
     # Let's create a uvindex of the dataset first.
     dataset_name = args['<dataset>']
@@ -284,18 +325,25 @@ def add_source(args):
     num_gens = len(segments)
     if (args['--test']):
         num_gens = 1
-    
+
+    # The string to keep as input for the uvcat-ing.
+    uvcatString = ""
     for i in xrange(0, num_gens):
         # Make a source object for this position.
         source = ephem.FixedBody()
         source.name = segments[i]['source']
         source._epoch = "2000"
+        source_index = -1
         for j in xrange(0, len(index_data['sources'])):
             if (index_data['sources'][j]['name'] == segments[i]['source']):
                 source._ra = index_data['sources'][j]['right_ascension']
                 source._dec = index_data['sources'][j]['declination']
+                source_index = j
                 break
         source.compute()
+        sourceRa = 15. * stringToFloat(index_data['sources'][j]['right_ascension'])
+        sourceDec = stringToFloat(index_data['sources'][j]['declination'])
+        
         
         ##### Find the times that this source was observed.
         # Where was the source at the start of the observations?
@@ -332,8 +380,13 @@ def add_source(args):
                 nsource._ra = args['--ra'][j]
                 nsource._dec = args['--dec'][j]
                 nsource.compute()
-                dra = (nsource.ra - source.ra) * (180. * 3600.) / math.pi # in arcseconds
-                ddec = (nsource.dec - source.dec) * (180. * 3600.) / math.pi # also in arcseconds
+                nsourceRa = 15. * stringToFloat(args['--ra'][j])
+                nsourceDec = stringToFloat(args['--dec'][j])
+                #dra = (nsource.ra - source.ra) * (180. * 3600.) / math.pi # in arcseconds
+                #ddec = (nsource.dec - source.dec) * (180. * 3600.) / math.pi # also in arcseconds
+                avdec = ((nsourceDec + sourceDec) / 2.) * (math.pi / 180.)
+                dra = (nsourceRa - sourceRa) * 3600. * math.cos(avdec)
+                ddec = (nsourceDec - sourceDec) * 3600.
                 # The source flux density.
                 fluxdens = float(args['--flux'][j]) # in Jy
                 # The source size.
@@ -349,7 +402,8 @@ def add_source(args):
                 src_lines.append("%.6f,%.3f,%.3f,%.3f,%.3f,%.3f,0,0,0,%.3f" % (fluxdens, dra, ddec,
                                                                                bmaj, bmin, bpa, specidx))
             # Make the file.
-            uvgen_source = "source_created_%s" % source.name
+            uvgen_source = "%s/source_created_%s" % (args['--temp-dir'],
+                                                     source.name)
             print "  Creating source generation file %s" % uvgen_source
             with open(uvgen_source, "w") as fp:
                 for j in xrange(0, len(src_lines)):
@@ -362,13 +416,13 @@ def add_source(args):
         print uvgen_stokes
         uvgen_lat = "%.6f" % math.degrees(telescope.lat)
         print uvgen_lat
-        uvgen_radec = "%s,%s" % (index_data['sources'][i]['right_ascension'],
-                                 index_data['sources'][i]['declination'])
+        uvgen_radec = "%s,%s" % (index_data['sources'][source_index]['right_ascension'],
+                                 index_data['sources'][source_index]['declination'])
         print uvgen_radec
         # Extend the HA range a little on each side.
         sidereal_modifier = 1.00273790935
-        start_ha = math.floor(start_hour_angle * 10. * sidereal_modifier) / 10.
-        finish_ha = math.ceil(finish_hour_angle * 10. * sidereal_modifier) / 10.
+        start_ha = math.floor(start_hour_angle * 10. * sidereal_modifier) / 10. - 0.05
+        finish_ha = math.ceil(finish_hour_angle * 10. * sidereal_modifier) / 10. + 0.05
         uvgen_harange = "%.2f,%.2f" % (start_ha, finish_ha)
         print uvgen_harange
         # The time at 0 HA.
@@ -391,7 +445,8 @@ def add_source(args):
         uvgen_baseunit = 3.33564
         
         # The name of the simulated dataset.
-        simulated_name = "%s_%s.uvgen" % (args['--out'], source.name)
+        simulated_name = "%s/%s_%s.uvgen" % (args['--temp-dir'], args['--out'],
+                                             source.name)
         # Delete this set if it exists.
         if os.path.isdir(simulated_name):
             shutil.rmtree(simulated_name)
@@ -405,8 +460,34 @@ def add_source(args):
                      freq=uvgen_freq, radec=uvgen_radec, harange=uvgen_harange,
                      stokes=uvgen_stokes, lat=uvgen_lat, out=simulated_name,
                      inttime=cycle_time)
+        # Chop out just the time range we want.
+        chop_start_time = date_to_mirtime(ephem.Date(segments[i]['start_time'] - (cycle_time / 2) * ephem.second))
+        chop_end_time = date_to_mirtime(ephem.Date(segments[i]['end_time'] + (cycle_time / 2) * ephem.second))
+        chop_time_select = "time(%s,%s)" % (chop_start_time, chop_end_time)
+        chop_file = "%s/segment_%04d.uvgen" % (args['--temp-dir'], i)
+        if os.path.isdir(chop_file):
+            shutil.rmtree(chop_file)
+        print "  Running uvaver to select time range %s - %s" % (chop_start_time, chop_end_time)
+        with open("last_uvaver.dbg", "w") as fp:
+            fp.write("uvaver vis=%s \"select=%s\" out=%s\n" % (simulated_name,
+                                                               chop_time_select,
+                                                               chop_file))
+        miriad.uvaver(vis=simulated_name, select=chop_time_select,
+                      out=chop_file)
+        # Add this dataset to the uvcat string.
+        uvcatString = add_uvcat(uvcatString, chop_file, args['--temp-dir'])
 
+    # Do the final uvcat.
+    finalout = "%s/allsegments.uvgen" % args['--temp-dir']
+    print "  Concatenating final product"
+    if os.path.isdir(finalout):
+        shutil.rmtree(finalout)
+    miriad.uvcat(vis=uvcatString, out=finalout)
 
+    # Mix in the two datasets.
+    print "  Adding the model to the initial dataset."
+    
+    
 if __name__ == '__main__':
     arguments = docopt(__doc__, version="Miriad Source Adding Helper 1.0")
     valid = True
@@ -440,6 +521,9 @@ if __name__ == '__main__':
         elif (not os.path.isfile(arguments['--source-file'])):
             print "Specified source file cannot be found."
             valid = false
+    # Check either the temp dir exists or can be made.
+    if (not os.path.isdir(arguments['--temp-dir'])):
+        os.makedirs(arguments['--temp-dir'])
     if (valid == True):
         print arguments
         add_source(arguments)
