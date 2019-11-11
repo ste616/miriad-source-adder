@@ -100,8 +100,10 @@ index of -0.7.
 
 Our real dataset is called real.5500, and we want to output a dataset called mixed.5500.
 
-`miriad-source-adder.py --ra 22:45:01.6 --dec -34:52:00 --size 10.0,6.0,90 -flux 0.8 --alpha -0.7 \
-			--out mixed.5500 --temp-dir tmp real.5500`
+```
+miriad-source-adder.py --ra 22:45:01.6 --dec -34:52:00 --size 10.0,6.0,90 -flux 0.8 --alpha -0.7 \
+			--out mixed.5500 --temp-dir tmp real.5500
+```
 
 ### Things you need to know
 
