@@ -255,7 +255,7 @@ def add_uvcat(fileString, newFile, outdir):
     if (os.path.isdir(outFile)):
         shutil.rmtree(outFile)
     print "  Concatenating intermediate product"
-    print "[%s]" % fileString
+    #print "[%s]" % fileString
     miriad.uvcat(vis=fileString, out=outFile)
     # Now add the new file to this.
     rv = add_uvcat(outFile, newFile, outdir)
@@ -293,7 +293,7 @@ def add_source(args):
                   log=uvlist_log_name)
     telescope_variables = filter_uvlist_variables(uvlist_log_name)
     cycle_time = round(telescope_variables['cycle_time'])
-    print "Found cycle time of %d seconds" % cycle_time
+    print "     Found cycle time of %d seconds" % cycle_time
     
     # Get the position of the telescope.
     miriad.set_filter('uvlist', filter_uvlist_antennas)
@@ -355,7 +355,7 @@ def add_source(args):
         # And the same for the end of the observation.
         telescope.date = ephem.Date(segments[i]['end_time'])
         finish_hour_angle = get_hour_angle(source, telescope)
-        print "%s %f %f" % (source.name, start_hour_angle, finish_hour_angle)
+        #print "%s %f %f" % (source.name, start_hour_angle, finish_hour_angle)
 
         # Work out the 0 hour angle. Get the nearest time to 0.
         transit_time = None
@@ -365,7 +365,7 @@ def add_source(args):
             transit_time = segments[i]['end_time'] - (finish_hour_angle * ephem.hour)
         transit_time = ephem.Date(transit_time)
 
-        print "transit time is %s" % transit_time
+        #print "transit time is %s" % transit_time
 
         # Work out the inputs to uvgen.
         if (arguments['--source-file'] is not None):
@@ -404,41 +404,41 @@ def add_source(args):
             # Make the file.
             uvgen_source = "%s/source_created_%s" % (args['--temp-dir'],
                                                      source.name)
-            print "  Creating source generation file %s" % uvgen_source
+            #print "  Creating source generation file %s" % uvgen_source
             with open(uvgen_source, "w") as fp:
                 for j in xrange(0, len(src_lines)):
                     fp.write("%s\n" % src_lines[j])
             
         uvgen_telescop = telescope_coordinates['telescope'].lower()
         uvgen_stokes = ",".join(index_data['polarisations']).lower()
-        print uvgen_source
-        print uvgen_telescop
-        print uvgen_stokes
+        #print uvgen_source
+        #print uvgen_telescop
+        #print uvgen_stokes
         uvgen_lat = "%.6f" % math.degrees(telescope.lat)
-        print uvgen_lat
+        #print uvgen_lat
         uvgen_radec = "%s,%s" % (index_data['sources'][source_index]['right_ascension'],
                                  index_data['sources'][source_index]['declination'])
-        print uvgen_radec
+        #print uvgen_radec
         # Extend the HA range a little on each side.
         sidereal_modifier = 1.00273790935
         start_ha = math.floor(start_hour_angle * 10. * sidereal_modifier) / 10. - 0.05
         finish_ha = math.ceil(finish_hour_angle * 10. * sidereal_modifier) / 10. + 0.05
         uvgen_harange = "%.2f,%.2f" % (start_ha, finish_ha)
-        print uvgen_harange
+        #print uvgen_harange
         # The time at 0 HA.
         uvgen_time = date_to_mirtime(transit_time)
-        print uvgen_time
+        #print uvgen_time
         # Use only frequency config 0, but we could probably change that if we need to.
-        print index_data['freq_configs']
+        #print index_data['freq_configs']
         chan_offset = math.floor(index_data['freq_configs'][0]['nchannels'][0] / 2)
         chan_spacing_mhz = index_data['freq_configs'][0]['frequency_increment'][0] * 1000.
         freq_offset_mhz = chan_spacing_mhz * chan_offset
         width_mhz = chan_spacing_mhz * index_data['freq_configs'][0]['nchannels'][0]
         uvgen_corr = "%d,1,%d,%.3f" % (index_data['freq_configs'][0]['nchannels'][0],
                                        freq_offset_mhz, width_mhz)
-        print uvgen_corr
+        #print uvgen_corr
         uvgen_freq = "%.3f,0.0" % index_data['freq_configs'][0]['frequency1'][0]
-        print uvgen_freq
+        #print uvgen_freq
         # Now we have to write out the antenna locations file.
         uvgen_ant = "antenna_configuration.file"
         output_antenna_file(telescope_coordinates, uvgen_ant)
@@ -467,7 +467,7 @@ def add_source(args):
         chop_file = "%s/segment_%04d.uvgen" % (args['--temp-dir'], i)
         if os.path.isdir(chop_file):
             shutil.rmtree(chop_file)
-        print "  Running uvaver to select time range %s - %s" % (chop_start_time, chop_end_time)
+        #print "  Running uvaver to select time range %s - %s" % (chop_start_time, chop_end_time)
         with open("last_uvaver.dbg", "w") as fp:
             fp.write("uvaver vis=%s \"select=%s\" out=%s\n" % (simulated_name,
                                                                chop_time_select,
@@ -486,7 +486,13 @@ def add_source(args):
 
     # Mix in the two datasets.
     print "  Adding the model to the initial dataset."
-    
+    if not os.path.isdir(finalout):
+        print "Something has gone wrong and the fake dataset has not been generated."
+        sys.exit()
+
+    miriad.uvmodel(vis=args['<dataset>'], model=finalout, select="-auto", options="add",
+                   out=args['--out'])
+    print "Process complete. The mixed dataset can be found at %s" % args['--out']
     
 if __name__ == '__main__':
     arguments = docopt(__doc__, version="Miriad Source Adding Helper 1.0")

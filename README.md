@@ -100,7 +100,8 @@ index of -0.7.
 
 Our real dataset is called real.5500, and we want to output a dataset called mixed.5500.
 
-`miriad-source-adder.py --ra 22:45:01.6 --dec -34:52:00 --size 10.0,6.0,90 -flux 0.8 --alpha -0.7 --out mixed.5500 --temp-dir tmp real.5500`
+`miriad-source-adder.py --ra 22:45:01.6 --dec -34:52:00 --size 10.0,6.0,90 -flux 0.8 --alpha -0.7 \
+			--out mixed.5500 --temp-dir tmp real.5500`
 
 ### Things you need to know
 
@@ -122,7 +123,13 @@ this script, which had 180 pointings, and 829 segments, a total of 1211 files we
 This is why the script has a `--temp-dir` argument, and why you are encouraged to use it. All files will be generated under
 this temporary directory. If you don't use it, all the files will be created in the current directory.
 
-There is one exception: the final output dataset (as specified by the `--out` argument) is put in the current directory.
+There is one exception: the final output dataset (as specified by the `--out` argument) is put in the current directory
+(or in whichever directory you have specified as part of the `--out` argument).
+
+__There is a default output name for the mixed dataset__
+
+If you don't give an `--out` argument, then the mixed dataset will just be the name of the real dataset, with `.sourceadd`
+appended.
 
 __uvmodel doesn't always work__
 
