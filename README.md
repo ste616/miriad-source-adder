@@ -105,6 +105,14 @@ miriad-source-adder.py --ra 22:45:01.6 --dec -34:52:00 --size 10.0,6.0,90 -flux 
 			--out mixed.5500 --temp-dir tmp real.5500
 ```
 
+### Command line arguments
+
+The script is controlled fully by the command line arguments you pass at runtime. The full list of arguments
+and what they control is given below.
+
+* `-h` or `--help`: show a brief usage guide listing the arguments supported and what they control.
+
+
 ### Things you need to know
 
 __You should apply the calibration on the real dataset beforehand__
