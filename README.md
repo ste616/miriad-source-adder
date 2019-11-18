@@ -110,7 +110,46 @@ miriad-source-adder.py --ra 22:45:01.6 --dec -34:52:00 --size 10.0,6.0,90 -flux 
 The script is controlled fully by the command line arguments you pass at runtime. The full list of arguments
 and what they control is given below.
 
+#### Default argument
+
+You must always specify one argument, that being the name of the dataset to which you want to add a
+source. This argument doesn't require any labelling. In the example above, `real.5500` is the default
+argument.
+
+#### Arguments without parameters
+
 * `-h` or `--help`: show a brief usage guide listing the arguments supported and what they control.
+
+#### Arguments requiring parameters
+
+__Controlling the generated source__
+
+To specify the parameters of the source to add to the dataset, use the following arguments.
+
+* `-s` or `--source`, with parameter `FILE`: use the file `FILE` in the call to uvgen, passing it along as
+the parameter to the argument `source`. While this may be completely appropriate if you're planning on adding
+one or more sources to a single pointing dataset, it will not work (and this script will warn you) if you're planning
+on adding a source to a mosaic. This is because the file expected by uvgen needs RA and Dec specified as offsets rather
+than fixed positions on the sky.
+* `-r` or `--ra`, with parameter `RA`: the right ascension of the source to add, given in sexagesimal (HH:MM:SS.S)
+format. This should be in the same frame as the dataset to which you are adding the source (and will almost certainly
+be J2000).
+* `-d` or `--dec`, with parameter `DEC`: the declination of the source to add, given in sexagesimal (DDD:MM:SS.S)
+format. Like RA, specify it in the same frame as the dataset.
+* `-f` or `--flux`, with parameter `FLUX`: the flux density of the source to add, in Jy.
+* `-S` or `--size`, with parameters `BMAJ,BMIN,BPA`: the size of the Gaussian source to add. The `BMAJ` and `BMIN`
+parameters are the semi-major and semi-minor length of the source respectively, both in arcsec. The `BPA` is the position
+angle of the Gaussian ellipsoid, in degrees, where 0 degrees puts the major axis along the right ascension direction,
+and positive position angles rotate eastwise.
+* `-a` or `--alpha`: the spectral index of the source to add.
+
+__Controlling the code__
+
+* `-o` or `--out`, with parameter `OUT`: the name of the output dataset, which is the combination of the input dataset
+and the generated source.
+* `-T` or `--temp-dir`, with parameter `DIR`: the name of a directory in which the script will put all the intermediate
+datasets it needs to generate. After a successful execution, this directory can be safely deleted if desired, although the
+script does not do so.
 
 
 ### Things you need to know
